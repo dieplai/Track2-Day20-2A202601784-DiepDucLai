@@ -19,17 +19,16 @@ genuinely packing concurrent requests into shared decode steps.
 
 ## Your observation
 
-Peak batch width was **3.94 of 4 slots** — essentially every decode step during
-the whole 60s sample had all 4 slots occupied. Little's Law in
-`02-server-results.md` gives a much larger effective concurrency at 50 users
-(41.5). The two numbers are not measuring the same thing, so they don't
-disagree so much as answer different questions: `n_busy_slots_per_decode` is
-capped at `--parallel` (4) by construction — it can never exceed the slot
-count, because a slot is either busy or not. Effective concurrency counts
-every request currently "in the system," including the ones sitting in the
-`requests_deferred` queue (which held at 40+ for this entire window) waiting
-for a slot to free up. So I trust **both**, for different claims: busy-slots
-(3.94/4) is the proof that the server is compute-saturated — it is never
-sitting idle — and effective concurrency (41.5) is the proof of how much
-*queueing* is stacked up behind that saturation. Together they say the same
-thing two ways: 4 slots is the real ceiling, and everything past it waits.
+Peak batch width was 3.94 of 4 slots, so basically every decode step in the
+whole 60s window had all 4 slots busy. That's a lot lower than the effective
+concurrency Little's Law gives in `02-server-results.md` at 50 users (41.5),
+and at first that looked like a contradiction to me. It isn't, really — they're
+just answering different questions. `n_busy_slots_per_decode` can't go above
+`--parallel` (4) by definition, a slot is either busy or it isn't. Effective
+concurrency counts everything currently in the system, including whatever is
+sitting in the `requests_deferred` queue (which stayed above 40 for the whole
+window) waiting its turn. So I'd trust both numbers, just for different
+things: busy-slots tells you the server is never sitting idle, and effective
+concurrency tells you how big the line behind that saturation actually is.
+Put together they're really saying one thing: 4 slots is the real ceiling, and
+everything past it just waits.

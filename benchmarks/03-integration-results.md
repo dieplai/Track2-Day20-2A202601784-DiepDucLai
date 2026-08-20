@@ -39,41 +39,40 @@ Specifically, this splitting occurs when:
 ## Which N16-N19 pieces are real
 
 - **N16 Cloud/IaC** — stub. Everything runs on `localhost`, no cluster or Compose stack.
-- **N17 Data pipeline** — stub. `TOY_DOCS` is an in-memory Python list, not a real ingest job.
-- **N18 Lakehouse** — stub. No table format at all; the toy dict stands in for it.
+- **N17 Data pipeline** — stub. `TOY_DOCS` is just an in-memory Python list, not a real ingest job.
+- **N18 Lakehouse** — stub. No table format at all, the toy dict stands in for it.
 - **N19 Vector + features** — stub. `retrieve()` is keyword overlap (`embed: 0.0 ms`
-  every query), not a real embedding index — I did not point `--embed-url` at
+  on every query), not a real embedding index — I never pointed `--embed-url` at
   `make serve-embed` for this run.
-- **N20 Serving** — **real**. Every query above hit the actual `llama-server` on
-  `:8091` over HTTP; the `llm` timings and answers are genuine model output.
+- **N20 Serving** — real. Every query above hit the actual `llama-server` on
+  `:8091` over HTTP, so the `llm` timings and the answers are genuine model output.
 
-Dominant stage is `llm` at 100% of total, which matches what I expected — with
-retrieval stubbed to keyword overlap it costs sub-millisecond, so decode/prefill was
-always going to own the budget regardless of model size.
+`llm` owning 100% of the total isn't a surprise — with retrieval stubbed to
+keyword overlap it costs basically nothing, so decode/prefill was always going
+to eat the whole budget regardless of model size.
 
-The numbers above are from a **second** `make pipeline` run; the first run is worth
-reporting too because the difference is the actual finding. First run: mean `llm`
-998.9ms would have been misleading — the *real* first run (right after `make
-metrics` + `make load-50` had just exercised the server) measured query 1 at
-8156.8ms total, with `server: prefill 151 tok / 7291 ms` — 7.3 seconds to prefill
-only 151 tokens. Queries 2 and 3 in that same run, sharing the same `LONG_CONTEXT`
-system prompt, prefilled in **50ms** for 113-114 tokens. On this second run,
-prefill for every query dropped to **4 tokens** (the model + llama-server's prompt
-cache had already stored the shared `LONG_CONTEXT` prefix from the first run, so
-only the trailing, per-query question needed re-prefilling). That is prompt/prefix
-caching in action, exactly the effect `labs/03-integrate/README.md` flags: the
-first hit on a shared prefix pays full prefill cost once, every subsequent request
-sharing that prefix pays only for its unique suffix. It also explains why query 1
-alone was the outlier in the first run — it was the only one of the three with a
-genuinely cold cache.
+The table above is from the **second** time I ran `make pipeline`. The first
+run is worth mentioning separately because that's where the actual interesting
+result is. I ran it right after `make metrics` + `make load-50` had just
+hammered the server, and query 1 alone took 8156.8ms — 7291ms of that was
+prefill, for just 151 tokens, which is absurdly slow for this model. Queries 2
+and 3 in that same run shared the same `LONG_CONTEXT` system prompt and
+prefilled in 50ms for a similar token count. So I reran the whole pipeline a
+second time on an otherwise-idle server, and prefill for every query dropped to
+just 4 tokens — the shared `LONG_CONTEXT` prefix was already sitting in
+`llama-server`'s prompt cache from the first run, so only the trailing,
+per-query question needed prefilling at all. That's prompt/prefix caching doing
+its job, which is exactly the effect `labs/03-integrate/README.md` points at:
+the first hit on a shared prefix pays the full prefill cost once, and everyone
+sharing that prefix afterward only pays for their own unique suffix. It also
+explains why only query 1 was slow in the first run — it was the only one of
+the three that actually hit a cold cache.
 
-If I had to halve this pipeline's latency: attack **prefill on cache-miss**, since
-that's the single biggest lever visible here (7291ms → 20-129ms is a >50x range
-depending on cache state, dwarfing the decode-side variance). Concretely: warm the
-cache deliberately (send the fixed system/context prefix once before serving real
-traffic) instead of relying on the first real user to pay for it, and keep prefix
-caching enabled (`llama-server` does this by default — don't disable it with
-`--no-context-shift` or a `/slots` reset between requests). A real N19 vector
-index would help too, by shrinking how much of `LONG_CONTEXT` gets injected per
-query in the first place, but the caching effect measured here is larger than
-what a smaller retrieved context alone would save.
+If I had to cut this pipeline's latency in half, I'd go after prefill on a
+cache miss first — that 7291ms vs 20-129ms range is well over 50x depending on
+cache state, way bigger than anything on the decode side. Concretely: warm the
+cache deliberately (fire the fixed context prefix once before real traffic
+starts) instead of letting the first unlucky user pay for it, and just leave
+prefix caching on, which is the default anyway. A real N19 vector index would
+help too by shrinking how much of `LONG_CONTEXT` gets stuffed into each prompt,
+but based on what I measured here, the caching effect alone is the bigger win.

@@ -16,23 +16,24 @@ Completed requests: `Q4_K_M` 10/10 · `UD-Q2_K_XL` 10/10
 
 ## Your observation
 
-Not worth it here. `UD-Q2_K_XL` is only 0.11 GB smaller (22%) but decodes **1.12x
-slower** (TPOT P50 6.3ms vs 5.6ms) and has a **2.1x worse TTFT P95** (132ms vs 63ms,
-a stray slow prefill in one of the 10 runs). This machine has `ngl=99` (Vulkan offload
-to the iGPU is active per `make probe`), so decode is GPU-compute-bound rather than
-CPU-memory-bandwidth-bound — the case in the note above where a heavier-quantized
-format's extra dequant work costs more than the bytes it saves.
+I'd say it's not worth it on this machine. UD-Q2_K_XL only saves 0.11 GB (22%
+smaller) but it actually decodes 1.12x slower (TPOT P50 6.3ms vs 5.6ms), and
+TTFT P95 is over 2x worse too (132ms vs 63ms — one of the 10 runs had a slow
+prefill). Makes sense once I checked `make probe`: this box runs with `ngl=99`,
+so decode happens on the iGPU through Vulkan, not on the CPU. That's exactly the
+case the note above warns about — when decode isn't memory-bandwidth-bound on
+the CPU, the extra dequant work from a heavier quant format can cost more than
+the bytes it saves.
 
-Quality confirms it's not a close call: I served both quants side by side
-(`make serve --port 8091` for Q4_K_M, `serve.py --compare --port 8090` for
-UD-Q2_K_XL) and sent the identical prompt ("Explain in 2 sentences why quantizing a
-language model to fewer bits makes inference faster but can hurt accuracy.") to both
-via `/v1/chat/completions` with `temperature=0`. Q4_K_M gave two coherent, on-topic
-sentences. UD-Q2_K_XL degenerated into repeating the same clause ("more fragile
-system that is more susceptible to small perturbations...") twice and then started
-narrating its own output ("The second sentence is a garbled version of the
-first."). At 0.8B parameters there is very little redundancy left to cut — 2-bit
-quantization pushes this specific model past a coherence cliff. Verdict: keep
-Q4_K_M. The 2-bit variant would only make sense on a RAM- or bandwidth-starved
-machine willing to trade coherence for a smaller file, and even then only after
-checking the answers don't degrade like this.
+The quality side made the call pretty easy honestly. I stood up both quants at
+once (Q4_K_M on port 8091, UD-Q2_K_XL via `serve.py --compare` on 8090) and sent
+the exact same prompt to both — "Explain in 2 sentences why quantizing a language
+model to fewer bits makes inference faster but can hurt accuracy," temperature 0
+on both. Q4_K_M answered in two clean sentences. UD-Q2_K_XL started repeating
+itself ("more fragile system that is more susceptible to small perturbations...")
+and then just kept narrating its own output afterward. At 0.8B params there
+isn't much redundancy left to squeeze out, so 2-bit seems to push this specific
+model past whatever coherence cliff it has. I'm keeping Q4_K_M. The 2-bit
+variant only makes sense if you're really starved for RAM or bandwidth and are
+okay trading away coherence for it — and even then, check the actual answers
+first, because this isn't a subtle degradation.

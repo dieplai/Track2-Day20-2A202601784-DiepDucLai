@@ -20,29 +20,30 @@ Quality eval: 10 auto-scorable one-line arithmetic prompts (`temperature=0`,
 
 ## Finding
 
-No measurable win or loss here — quality is identical (same 9/10, same failure:
-"100 - 63" → "77" both times, so it's a model-capability miss, not a
-cache-precision artifact), and latency differs only within run-to-run noise
-(83ms vs 90ms avg, both single-token-ish arithmetic answers).
+No real win or loss to report — quality came out identical (9/10 both times,
+and even the same wrong answer, "100 - 63" → "77" — so that's a model
+capability gap, not something the cache precision caused), and latency only
+moves within normal run-to-run noise (83ms vs 90ms average, on arithmetic
+answers that are basically one token anyway).
 
-The interesting result is the RSS column going the *wrong* way (510 MB with
-q8_0 vs 454 MB fp16, i.e. no savings, if anything slightly more). The reason
-is a measurement-boundary mistake, not a llama.cpp bug: this server runs with
-`-ngl 99` (full GPU offload via Vulkan), so the KV cache for all layers lives
-in **VRAM**, not host RAM. Host process RSS was never going to show KV cache
-savings on this config — it's the wrong side of the PCIe bus to be watching.
-`--cache-type-k/v` would show up in `nvidia-smi`/Vulkan device memory, not
-`ps`, and the two RSS numbers above are just noise from the host-side HTTP/
-scheduler buffers, not the KV cache at all.
+What actually caught my attention was the RSS column going the wrong way —
+510 MB with q8_0 vs 454 MB on fp16, so no savings, if anything slightly worse.
+Took me a second to realize why: this server runs `-ngl 99`, meaning it's
+fully offloaded to the iGPU through Vulkan, so the KV cache for every layer
+lives in VRAM, not host RAM. I was watching the wrong side of the bus the
+whole time. `--cache-type-k/v` would actually show up in `nvidia-smi` or
+Vulkan device memory, not in `ps` — the RSS numbers above are just noise from
+whatever the HTTP server and scheduler keep on the host, nothing to do with
+the KV cache itself.
 
-Second reason the effect would be small even if measured on the right device:
-`n_ctx_slot` here is only 512 tokens (2048 `ctx` / 4 `--parallel` slots), and
-this is a 0.8B model — the KV cache at that size is already tiny in absolute
-terms (a few MB total across all layers and slots) next to the ~500 MB of
-model weights, so even a 2x KV cache compression from q8_0 would be a rounding
-error against total footprint. This challenge would show a real RSS/VRAM delta
-on a CPU-only run (`-ngl 0`, KV cache stays in host RAM) at a much larger
-`--ctx-size` (many thousands of tokens per slot), where KV cache stops being
-negligible relative to the weights. Both of those are changes I'd make before
-concluding q8_0 KV cache "doesn't matter" in general — it wasn't given the
-conditions to matter *here*.
+Even on the right device, I don't think the effect would have been big here
+anyway. `n_ctx_slot` is only 512 tokens (2048 `ctx` split across 4
+`--parallel` slots), and the model is 0.8B — at that size the KV cache is
+already tiny, a few MB total, compared to ~500 MB of weights. Halving that
+few MB with q8_0 wouldn't move the needle. To actually see this challenge do
+something, I'd want two changes: run CPU-only (`-ngl 0`, so KV cache stays in
+host RAM where I can measure it with `ps`) and push `--ctx-size` up to
+several thousand tokens per slot, where the KV cache stops being a rounding
+error next to the weights. Without those two changes, this isn't really
+evidence that q8_0 KV cache doesn't help — it just never got a fair shot to
+show it here.

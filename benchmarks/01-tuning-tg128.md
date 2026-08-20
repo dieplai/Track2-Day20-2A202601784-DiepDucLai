@@ -23,15 +23,18 @@ LAB_N_THREADS=6 make bench
 
 ## Your explanation
 
-No knee at all — the curve is flat within noise (189.5 to 191.3 tok/s, a 1.01x
-spread) across every point from `-t 1` to `-t 24` (2x logical cores). That
-contradicts the expected shape from the deck, where decode should climb to the
-physical core count and then drop from memory-bandwidth contention. The reason:
-`ngl=99` on this machine (see `hardware.json` / `make probe`) offloads all 24
-transformer layers to the Vulkan backend running on the integrated GPU. Decode
-happens almost entirely on the iGPU's compute units and VRAM bandwidth — the CPU
-threads set by `-t` only handle the small amount of host-side dispatch/glue work
-around each Vulkan call, which is cheap and does not scale with thread count.
-So `-t` was never the lever that mattered on this box; it would matter if I forced
-CPU-only decode (`ngl=0`), which is exactly what I tested separately for
-REFLECTION §5 — see that section for the number that actually moved.
+Honestly there's no knee here at all. The whole curve sits within noise of each
+other, 189.5 to 191.3 tok/s, from `-t 1` all the way to `-t 24` (twice the
+logical core count). That's not what I expected going in — the deck says decode
+should climb up to the physical core count and then fall off once threads start
+fighting over memory bandwidth. So why so flat?
+
+Checked `hardware.json` and it clicked: this machine runs with `ngl=99`, meaning
+all the transformer layers get offloaded to Vulkan on the integrated GPU. Decode
+is basically happening on the iGPU's own compute units and its own memory
+bandwidth. The `-t` threads on the CPU side are only doing small dispatch/glue
+work around each Vulkan call — cheap work that doesn't really scale up or down
+with more threads. So thread count was never going to be the lever that moves
+anything here. What actually matters on this box is GPU offload itself — I
+tested that separately (`-ngl 0` vs `-ngl 99`) for REFLECTION §5, and that's
+where the real 3.25x shows up.

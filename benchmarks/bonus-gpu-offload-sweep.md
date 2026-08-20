@@ -21,23 +21,24 @@ started paying to fetch weights it could not hold.
 
 ## Your finding
 
-Full offload is best, and nothing ran out — `-ngl 32` and `-ngl 99` give the
-identical 190.5 tok/s, which is llama.cpp's own tell that the model has fewer
-than 32 transformer layers and every layer was already moved by `-ngl 32`;
-`-ngl 99` just clamps to the same "all of it." No VRAM ceiling was hit: this
-model is ~500 MB total, trivially small next to both the free VRAM `make probe`
-reported on the Vulkan device (8110 MiB free) and the discrete RTX 3050 Ti's
-4096 MiB — so this sweep never entered the "partial offload, something didn't
-fit" regime the note above warns about. That regime would need a model in the
-multi-GB range on this hardware to actually show up.
+Full offload wins, and nothing ran out of room. `-ngl 32` and `-ngl 99` land on
+the exact same 190.5 tok/s, which is llama.cpp telling me the model has fewer
+than 32 layers and everything was already moved by `-ngl 32` — `-ngl 99` just
+clamps to the same "all of it." Makes sense given the model is only ~500 MB,
+tiny next to the 8110 MiB free VRAM `make probe` reported on the Vulkan device
+(or the RTX 3050 Ti's 4096 MiB, for that matter). So this sweep never really
+got into the "something didn't fit, GPU has to keep fetching weights"
+territory the note above describes — that would need a much bigger model than
+what I'm running here.
 
-What is interesting is the shape *between* 0 and full offload: throughput
-climbs almost linearly with layer count (58.6 → 84.1 → 118.0 → 175.3 tok/s as
-`-ngl` goes 0→8→16→24, roughly +25 to +35 tok/s per 8 layers moved), not a
-step function. That says each layer's decode cost is genuinely additive
-between the two backends — a CPU layer and a GPU layer both cost roughly their
-own fixed price, so partial offload is not "all or nothing," it is a smooth
-knob. On a bigger model that didn't fit fully in VRAM, this same shape is
-exactly what you'd use to find the split that maximizes tok/s under a hard
-VRAM budget: push `-ngl` up until the curve visibly bends over, and stop
-there rather than at the theoretical max.
+The part I actually found interesting was the shape between 0 and full
+offload. It climbs almost in a straight line — 58.6, 84.1, 118.0, 175.3 tok/s
+as `-ngl` goes 0, 8, 16, 24 — roughly +25 to +35 tok/s per 8 layers, not some
+step function that jumps once you cross a threshold. That tells me each
+layer's decode cost is basically additive across the two backends: a CPU layer
+costs about what a CPU layer costs, a GPU layer costs about what a GPU layer
+costs, and partial offload isn't really an all-or-nothing switch, it's a
+gradual knob. On a bigger model that doesn't fit entirely in VRAM, this is
+exactly the curve you'd use to find the split that gets you the most tok/s
+under a fixed VRAM budget — push `-ngl` up until you see the curve start to
+bend, and stop there instead of chasing the theoretical max.

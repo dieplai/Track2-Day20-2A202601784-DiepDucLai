@@ -29,38 +29,35 @@ P95 grew no faster than throughput (0.39x vs 2.49x), so this server still has he
 
 ## Your reading
 
-**Don't trust the P95 column above at face value — it's contaminated by a
-one-time warm-up artifact, and the real evidence is elsewhere.** Looking at
-`benchmarks/locust-10_stats_history.csv`, the first ~25 requests of the
-`load-10` run each took 28–33 seconds, then latency dropped to a steady 1.5–5s
-band for the rest of the minute. That burst is the *first* time all 4
-decode slots got used concurrently (the only request before it was the single
-`make smoke` call) — some one-time allocation/scheduling cost on cold slots,
-not steady-state behavior. Because `load-50` ran second, its slots were
-already warm, so its P95/max (12000ms) come out *lower* than `load-10`'s
-(31000/32673ms) despite 5x the load — the opposite of what you'd expect from
-contention alone. Comparing raw P95 across the two runs would be reading noise.
+I almost took the P95 column at face value and then double-checked it against
+`benchmarks/locust-10_stats_history.csv` — glad I did, because it's misleading.
+The first ~25 requests of the `load-10` run each took 28-33 seconds, then
+latency dropped to a normal 1.5-5s band for the rest of the minute. That burst
+lines up exactly with the first moment all 4 decode slots got used at once (the
+only request before it was the single `make smoke` call) — reads like a
+one-time cold-start cost, not steady-state behavior. Since `load-50` ran right
+after, its slots were already warm, so its P95/max (12000ms) actually comes out
+lower than `load-10`'s (31000/32673ms) despite carrying 5x the load. That's the
+opposite of what contention alone would predict, so comparing raw P95 across
+the two runs is basically comparing noise to noise.
 
-The number that actually convinced me: **median latency**, which isn't skewed
-by that one burst. It goes from 1700ms (10 users) to 10000ms (50 users) — a
-**5.88x** increase for a 5x increase in offered load, i.e. latency degraded
-almost exactly proportionally to load. That's corroborated by two
-independent signals: effective concurrency (Little's Law) jumped from 8.4 to
-41.5 against only 4 `--parallel` slots (occupancy/slot ratio 10.37), and
-`make metrics` sampled while `load-50` ran shows `n_busy_slots_per_decode`
-pinned at 3.9–3.94 of 4 slots for the entire 60s window with `requests_deferred`
-holding at 40+ throughout — the server was never idle and was continuously
-turning away requests it had no slot for. All three signals agree: **the
-server is saturated by 50 users**, and most of that added latency is queue
-time, not compute time (compute per request is still the ~400ms decode `make
-bench` measured at 4x that concurrency's worth of tokens/sec).
+What convinced me instead was the median, since it isn't dragged around by that
+one burst: 1700ms at 10 users to 10000ms at 50 users, a 5.88x jump against a 5x
+increase in load — degrading almost exactly in proportion. Two other signals
+back this up independently: effective concurrency (Little's Law) goes from 8.4
+to 41.5 against only 4 `--parallel` slots, and `make metrics`, sampled while
+`load-50` was running, shows `n_busy_slots_per_decode` pinned at 3.9-3.94 of 4
+for the full 60 seconds, with `requests_deferred` sitting above 40 the whole
+time. The server was never idle, and it was constantly turning requests away
+for lack of a free slot. All three point the same direction — saturated by 50
+users, and the extra latency is queue time, not the model getting slower
+(compute per request is still around the ~400ms `make bench` measured).
 
-To raise goodput@SLO here, the first knob I'd reach for is `--parallel`
-(more concurrent slots), not threads or quantization. The bottleneck is
-`n_busy_slots_per_decode` pinned at the slot ceiling while the GPU (`ngl=99`,
-Vulkan iGPU) is doing the actual decode work — CPU threads are idle-ish per the
-flat thread sweep in `01-tuning-tg128.md`, so there is compute headroom being
-left on the table by only ever offering 4 slots. I'd raise `--parallel` to 8
-and re-run `load-50`, watching whether `n_busy_slots_per_decode` still pins at
-the new ceiling (more headroom exists) or median latency stops improving
-(the iGPU's own decode throughput, not slot count, is now the limit).
+If I wanted to raise goodput here, the first thing I'd try is `--parallel`
+(more slots), not threads or a smaller quant. The decode work is happening on
+the iGPU through Vulkan, and CPU threads are basically idle per the flat sweep
+in `01-tuning-tg128.md` — so 4 slots looks like an artificial ceiling rather
+than the GPU's actual limit. I'd bump `--parallel` to 8 and rerun `load-50`:
+if `n_busy_slots_per_decode` still pins at the new number, there's more
+headroom; if median latency stops improving instead, then the iGPU's own
+decode throughput is the real limit, not the slot count.
