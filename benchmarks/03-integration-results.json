@@ -1,0 +1,104 @@
+{
+  "backend": "keyword overlap",
+  "mean_ms": {
+    "embed": 0.0,
+    "retrieve": 0.0,
+    "llm": 998.9,
+    "total": 999.0
+  },
+  "results": [
+    {
+      "query": "Why is goodput more useful than raw throughput?",
+      "answer": "Based on the provided context, **goodput** is more useful than raw throughput because it specifically accounts for **SLOs** (Service Level Objectives) and **TPOT** (Time-to-Pollout/Throughput Optimization Targets).\n\nRaw throughput ignores SLOs, whereas goodput counts only requests per second that met the TTFT and TPOT targets. This means goodput ensures that the system's output aligns with the service level requirements defined by the SLOs and TPOT, whereas raw throughput would measure the total volume of requests regardless of whether they met the performance targets.",
+      "contexts": [
+        {
+          "id": "goodput",
+          "score": 1.0
+        },
+        {
+          "id": "paged",
+          "score": 0.0
+        },
+        {
+          "id": "radix",
+          "score": 0.0
+        }
+      ],
+      "embed_backend": "keyword overlap",
+      "timings_ms": {
+        "embed": 0.0,
+        "retrieve": 0.0,
+        "llm": 1151.5,
+        "total": 1151.6
+      },
+      "server_timings": {
+        "prompt_n": 4,
+        "prompt_ms": 128.817,
+        "predicted_n": 122,
+        "predicted_ms": 873.415
+      }
+    },
+    {
+      "query": "What problem does PagedAttention actually solve?",
+      "answer": "PagedAttention actually solves the problem of **internal fragmentation in GPU memory**.\n\nWhile the context mentions that it removes fragmentation by storing KV in non-contiguous pages, the core benefit described is specifically the **reduction of wasted GPU memory**. By avoiding the need to cache data in contiguous memory blocks (like the standard `KVCache`), PagedAttention allows the GPU to utilize more of its available memory, which is critical for high-throughput inference tasks.",
+      "contexts": [
+        {
+          "id": "paged",
+          "score": 1.0
+        },
+        {
+          "id": "radix",
+          "score": 0.0
+        },
+        {
+          "id": "disagg",
+          "score": 0.0
+        }
+      ],
+      "embed_backend": "keyword overlap",
+      "timings_ms": {
+        "embed": 0.0,
+        "retrieve": 0.0,
+        "llm": 607.4,
+        "total": 607.5
+      },
+      "server_timings": {
+        "prompt_n": 4,
+        "prompt_ms": 18.071,
+        "predicted_n": 93,
+        "predicted_ms": 559.805
+      }
+    },
+    {
+      "query": "When does splitting prefill and decode help?",
+      "answer": "Splitting prefill and decode helps when the model's **compute-bound prefill** (which is expensive) and **memory-bound decode** (which is slow) are competing for the same resources, causing the model to be stuck in a suboptimal state.\n\nSpecifically, this splitting occurs when:\n1.  **Prefill is bound to compute:** The prefilling phase requires significant GPU/CPU time and resources.\n2.  **Decode is bound to memory:** The decoding phase requires significant memory bandwidth and latency.\n3.  **The bottleneck is shared:** If the prefill and decode operations are happening on the same hardware resources (e.g., the same GPU or CPU), the system cannot efficiently split them.\n\nIn this scenario, the split allows the system to:\n*   **Skip prefill entirely:** The engine can use the cached KV from the prefix to bypass the expensive prefill phase, effectively skipping the compute-bound part of the model.",
+      "contexts": [
+        {
+          "id": "disagg",
+          "score": 2.0
+        },
+        {
+          "id": "radix",
+          "score": 1.0
+        },
+        {
+          "id": "batching",
+          "score": 1.0
+        }
+      ],
+      "embed_backend": "keyword overlap",
+      "timings_ms": {
+        "embed": 0.0,
+        "retrieve": 0.0,
+        "llm": 1237.9,
+        "total": 1238.0
+      },
+      "server_timings": {
+        "prompt_n": 4,
+        "prompt_ms": 19.558,
+        "predicted_n": 200,
+        "predicted_ms": 1186.301
+      }
+    }
+  ]
+}
